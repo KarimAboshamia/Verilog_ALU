@@ -1,0 +1,175 @@
+
+`define NUM_BITS 5
+
+/* ++++++++++++++++Components+++++++++++++ */
+module half_adder(sum, carry, a, b);
+   input a, b;
+   output sum, carry;
+   xor(sum, a, b);
+   and(carry, a, b);
+endmodule
+
+module full_adder(output sum, output carry, input x, input y, input z);
+   wire s1, c1, c2;
+   half_adder h1(s1, c1, x, y);
+   half_adder h2(sum, c2, s1, z);
+   or(carry, c1, c2);
+endmodule
+
+module mux4_1(output y, input[1:0] s, input a1, input a2, input a3, input a4);
+wire a,b,c,d;
+      and(a, a1, ~s[1], ~s[0]);
+      and(b, a2, ~s[1], s[0]);
+      and(c, a3, s[1], ~s[0]);
+      and(d, a4, s[1], s[0]);
+      or(y, a, b, c, d);
+endmodule
+
+module specialMux4_1(output [N:0] y, input[1:0] s, input[N:0] a1, input[N:0] a2, input[N:0] a3);
+parameter N = `NUM_BITS;
+
+generate
+genvar i;
+for(i=0;i<=N;i=i+1)
+begin
+   wire a,b,c;
+   and(a, a1[i], ~s[1], ~s[0]);
+   and(b, a2[i], ~s[1], s[0]);
+   and(c, a3[i], s[1], ~s[0]);
+      //and(d, a4, s[1], s[0]);
+   or(y[i], a, b, c);
+end
+endgenerate
+
+endmodule
+
+
+/* Arithmetic Circuit */
+module arth(output [N:0] p, input[1:0] s, input [N-1:0]A, input [N-1:0]B);
+parameter N = `NUM_BITS;
+wire [N-1:0] y;
+wire [N:0] carries;
+buf(carries[0], 1'b0);
+
+//two's complement
+wire[N:0] tempP;
+wire[N:0] tempCarries;
+
+wire[N:0] sta; // check if it's okay or not
+buf(sta[0], 1'b1);
+genvar t;
+for(t=1; t<=N; t = t + 1)
+begin
+  buf(sta[t], 1'b0);
+end
+
+buf(tempCarries[0], 1'b0);
+
+generate   
+genvar  c;
+for(c=0;c<=N-1;c=c+1)
+begin
+   full_adder f3(tempP[c], tempCarries[c+1], ~B[c], sta[c], tempCarries[c]);
+end
+endgenerate
+
+buf(tempP[N], tempCarries[N]);//TWO'S COMPLEMENT OF B 'Y'
+
+generate
+   genvar i;
+   for(i=0;i<=N-1;i=i+1)
+    begin
+      mux4_1 f1(y[i], s, B[i], tempP[i], sta[i], 1'b1);//Y, ~Y, ,
+      full_adder f2(p[i], carries[i+1], y[i], A[i], carries[i]);
+    end
+endgenerate
+   buf(p[N], carries[N]);   
+endmodule
+
+
+// /* Shift Circuit */
+module four_bit_right_arithmetic_shift_reg (output [N:0] y, input[N-1:0] a);
+parameter N = `NUM_BITS;
+buf(y[N-1], a[N-1]);
+
+generate
+    genvar i;
+    for(i=N-2;i>=0;i=i-1)
+    begin
+       buf(y[i],a[i+1]);
+    end
+    endgenerate
+    buf(y[N], a[0]);
+endmodule
+
+/* Logic Circuit */
+module logicUnit(output [N:0] y, input [1:0] s,input [N-1:0] A, input [N-1:0] B);
+parameter N = `NUM_BITS;
+    wire [N-1:0] w1;
+    wire [N-1:0] w2;
+    wire [N-1:0] w3;
+    wire [N-1:0] w4;
+    generate
+    genvar i;
+    for(i=0;i<N;i=i+1)
+    begin
+        and(w1[i], A[i], B[i]);
+        or(w2[i], A[i], B[i]);
+        xor(w3[i], A[i], B[i]);
+        not(w4[i], A[i]);
+        mux4_1 m1(y[i], s, w1[i], w2[i], w3[i], w4[i]);  
+    end
+    endgenerate
+    buf(y[N], 1'b0);
+endmodule
+
+
+module ALU(output [N:0] f, input [1:0] selectionALU, input [1:0] selection, input [N-1:0] A, input[N-1:0] B);
+parameter N = `NUM_BITS;
+//run Arithmetic circuit
+wire[N:0] arth;
+arth ts(arth, selection, A, B);
+
+//run Logic Circuit
+wire [N:0] logCirc;// 0 1101
+logicUnit lu(logCirc, selection, A, B);
+
+//run shift Circuit
+wire [N:0] sh; //0 1101
+four_bit_right_arithmetic_shift_reg sl(sh, A);
+
+
+//send 4 inputs to 4x1 mux to select one output
+specialMux4_1 f1(f, selectionALU, arth, logCirc, sh);  
+endmodule
+
+module testALU(output [N:0] A, input [1:0] selectionALU, input[1:0] selection, input [N-1:0]X, input[N-1:0]Y);
+   parameter N = `NUM_BITS;
+   ALU test(A, selectionALU, selection, X, Y);
+
+   initial
+   begin
+      if(N==6) $monitor("Carry=%b, A[5]=%b, A[4]=%b, A[3]=%b, A[2]=%b, A[1]=%b, A[0]=%b", A[6], A[5], A[4], A[3], A[2], A[1], A[0]);
+      if(N==5) $monitor("Carry=%b, A[4]=%b, A[3]=%b, A[2]=%b, A[1]=%b, A[0]=%b", A[5], A[4], A[3], A[2], A[1], A[0]);
+      if(N==4) $monitor("Carry=%b, A[3]=%b, A[2]=%b, A[1]=%b, A[0]=%b", A[4], A[3], A[2], A[1], A[0]);
+      $finish;
+   end
+   
+endmodule
+
+module main();
+   parameter N = `NUM_BITS;
+   wire [N:0] A;
+   wire[N-1:0] X = 5'b11101;
+   wire[N-1:0] Y = 5'b00010;
+   
+    wire[1:0] s;
+    buf(s[0], 1'b0);
+    buf(s[1], 1'b0);
+
+    wire[1:0] aluS;
+    buf(aluS[0], 1'b0);
+    buf(aluS[1], 1'b1);
+
+    testALU testing(A, aluS, s ,X, Y);
+endmodule
